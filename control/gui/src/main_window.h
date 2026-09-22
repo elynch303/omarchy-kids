@@ -6,6 +6,7 @@
 #include <string>
 
 #include "omarchy-kids-control/host_registry.h"
+#include "omarchy-kids-control/install_requests.h"
 
 class QListWidget;
 class QListWidgetItem;
@@ -17,7 +18,8 @@ class QTimer;
 
 // Minimal-but-real dashboard: a list of paired children, a status/security-
 // events panel for whichever one is selected, an app-unlock control, and a
-// way to pair a new one (see PairingDialog). Polls the selected host's
+// way to pair a new one (see PairingDialog) or remove an existing pairing
+// (the ✕ at the end of each row). Polls the selected host's
 // `omarchy-kids-agent status`/`report` over SSH (see AgentClient) on a
 // timer; severe security events get a local `notify-send` (issue #10's
 // "active notification on the parent's computer" — there was nothing on
@@ -40,6 +42,10 @@ private slots:
 
 private:
     void refreshHostList();
+    // Asks for confirmation, then forgets the host and deletes its saved
+    // keypair. Does NOT (cannot) remove the matching line from the child's
+    // authorized_keys — the confirmation dialog says so.
+    void removeHost(const std::string& name);
     // Runs the two SSH round trips on a worker thread (AgentClient::run
     // blocks for up to its timeout) and marshals the result back to this
     // object's thread via a queued invocation — a poll must never freeze
@@ -52,10 +58,24 @@ private:
     void notifySevereEvents(const std::string& hostName, const QString& reportJson);
     void applyUnlockResult(const std::string& hostName, bool ok, const QString& resultJson);
 
+    // Install requests: things the child asked to install (`omarchy-kids-agent
+    // request-install`). The panel lists the ones still waiting for an answer
+    // (Approve / Deny) and the approved ones not installed yet (Install...).
+    void applyRequestsResult(const std::string& hostName, bool ok, const QString& requestsJson);
+    // Asks for confirmation and the admin account name, records the approval on
+    // the child, then opens a terminal that runs the install there as that
+    // admin account — the parent types that account's password in the terminal.
+    void approveRequest(const std::string& hostName, const omarchy_kids::control::InstallRequest& request);
+    void denyRequest(const std::string& hostName, const omarchy_kids::control::InstallRequest& request);
+
     omarchy_kids::control::HostRegistry registry_;
     QListWidget* hostList_ = nullptr;
     QLabel* statusLabel_ = nullptr;
     QListWidget* eventsList_ = nullptr;
+    QListWidget* requestsList_ = nullptr;
+    // True while an approve/deny dialog is open: the periodic poll must not
+    // rebuild the request rows underneath a button whose handler is running.
+    bool requestDialogOpen_ = false;
     QPushButton* refreshButton_ = nullptr;
     QLineEdit* unlockAppEdit_ = nullptr;
     QSpinBox* unlockMinutesSpin_ = nullptr;

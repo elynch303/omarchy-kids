@@ -6,7 +6,10 @@
 
 use clap::{Parser, Subcommand};
 use omarchy_kids_common::paths;
-use omarchy_kids_common::protocol::{AppUsage, Request, Response, ReportPayload, StatusPayload};
+use omarchy_kids_common::protocol::{
+    AppUsage, InstallRequestInfo, InstallRequestsPayload, Request, Response, ReportPayload,
+    StatusPayload,
+};
 use omarchy_kids_common::transport;
 use std::path::{Path, PathBuf};
 use std::process::{Command as OsCommand, ExitCode};
@@ -68,6 +71,30 @@ enum Command {
         tier: String,
         #[arg(long)]
         apps_file: Option<PathBuf>,
+    },
+    /// Ask a parent to approve installing a package. Only packages from the
+    /// official or Omarchy repositories can be requested (not the AUR), and
+    /// nothing is installed until a parent approves it and installs it with
+    /// their admin account.
+    RequestInstall {
+        package: String,
+        /// Optional short note for the parent ("for art class").
+        #[arg(long)]
+        note: Option<String>,
+    },
+    /// List install requests, newest first.
+    Requests {
+        /// Only this status: pending, approved, denied or installed.
+        #[arg(long)]
+        status: Option<String>,
+    },
+    /// Approve or deny a pending install request (used by the Control
+    /// Center). Approving records the decision only — the install itself
+    /// needs the admin account's password.
+    DecideRequest {
+        id: i64,
+        /// `approve` or `deny`.
+        decision: String,
     },
     /// Re-open the pairing window (mDNS + QR, same as first boot) so the
     /// Control Center can pair with this machine again, authenticated
@@ -146,6 +173,17 @@ fn to_request(cmd: &Command) -> Request {
             minutes: *minutes,
         },
         Command::Report { week } => Request::Report { week: *week },
+        Command::RequestInstall { package, note } => Request::InstallRequest {
+            package: package.clone(),
+            note: note.clone(),
+        },
+        Command::Requests { status } => Request::ListInstallRequests {
+            status: status.clone(),
+        },
+        Command::DecideRequest { id, decision } => Request::DecideInstallRequest {
+            id: *id,
+            decision: decision.clone(),
+        },
         Command::SetTier { .. } => unreachable!("handled by run_set_tier"),
         Command::Override { .. } => unreachable!("handled by run_override"),
         Command::RepairPairing { .. } => unreachable!("handled by run_repair_pairing"),
@@ -177,7 +215,44 @@ fn send_and_print(socket: &Path, req: Request, json_out: bool) -> Result<(), Str
             minutes.unwrap_or(omarchy_kids_common::protocol::DEFAULT_UNLOCK_MINUTES)
         ),
         Request::SetTier { tier, .. } => println!("Tier set to '{tier}'."),
+        Request::InstallRequest { .. } => {
+            let info: InstallRequestInfo =
+                serde_json::from_value(resp.data.clone().unwrap_or_default())
+                    .map_err(|e| format!("malformed install request payload: {e}"))?;
+            println!(
+                "Request #{} sent: {} {} ({}, {}).",
+                info.id, info.package, info.version, info.repo, info.download_size
+            );
+            println!("A parent has to approve it, and then install it for you.");
+        }
+        Request::ListInstallRequests { .. } => print_install_requests(&resp)?,
+        Request::DecideInstallRequest { id, decision } => println!(
+            "Request #{id} {}.",
+            if decision == "approve" { "approved" } else { "denied" }
+        ),
         _ => {}
+    }
+    Ok(())
+}
+
+fn print_install_requests(resp: &Response) -> Result<(), String> {
+    let payload: InstallRequestsPayload =
+        serde_json::from_value(resp.data.clone().unwrap_or_default())
+            .map_err(|e| format!("malformed install requests payload: {e}"))?;
+    if payload.requests.is_empty() {
+        println!("No install requests.");
+        return Ok(());
+    }
+    println!("{:<5} {:<10} {:<28} {:<10} note", "id", "status", "package", "size");
+    for r in &payload.requests {
+        println!(
+            "{:<5} {:<10} {:<28} {:<10} {}",
+            r.id,
+            r.status,
+            format!("{} {}", r.package, r.version),
+            r.download_size,
+            r.note.as_deref().unwrap_or("")
+        );
     }
     Ok(())
 }

@@ -1,0 +1,12 @@
+[Unit]
+Description=Omarchy Kids autonomous OS update (issue #31)
+# This account has no admin rights, and the tier hides Omarchy's own
+# update prompt (see hypr/autostart.lua) -- without this unit nothing would
+# ever update the machine. Fully autonomous, no parent/Control-Center trigger.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/omarchy-update -y
+# omarchy-update already creates a Snapper snapshot (omarchy-snapshot create)
+# before touching packages when snapshots are configured -- the rollback
+# safety net for a bad update already exists upstream, not reimplemented here.

@@ -1,12 +1,12 @@
-use crate::{allowlist, budget, db, launcher, security};
+use crate::{allowlist, budget, db, installs, launcher, security};
 use crate::state::{ActiveSession, State};
 use chrono::{Datelike, Duration as ChronoDuration, Local, Utc};
 use omarchy_kids_common::config::UnlockedApp;
 use omarchy_kids_common::desktop;
 use omarchy_kids_common::paths;
 use omarchy_kids_common::protocol::{
-    AllowedPayload, AppUsage, DEFAULT_UNLOCK_MINUTES, Request, Response, ReportPayload,
-    SecurityEventSummary, StatusPayload,
+    AllowedPayload, AppUsage, DEFAULT_UNLOCK_MINUTES, InstallRequestInfo, InstallRequestsPayload,
+    Request, Response, ReportPayload, SecurityEventSummary, StatusPayload,
 };
 use std::sync::{Arc, Mutex};
 
@@ -25,7 +25,7 @@ const OVERRIDE_FAILURE_WINDOW_MINUTES: i64 = 5;
 /// This enumeration plus the per-tile validation below is the accepted
 /// mitigation: content is validated, the caller isn't. Matches CLAUDE.md's
 /// "Current focus" — extend this when a second tier actually ships.
-const KNOWN_TIERS: &[&str] = &["mini"];
+const KNOWN_TIERS: &[&str] = &["mini", "maxi"];
 
 pub fn dispatch(state: &Arc<Mutex<State>>, req: Request) -> Response {
     match req {
@@ -47,6 +47,137 @@ pub fn dispatch(state: &Arc<Mutex<State>>, req: Request) -> Response {
         Request::PushContent { .. } => {
             Response::err("push-content is reserved but not implemented yet (see issue #13)")
         }
+        Request::InstallRequest { package, note } => handle_install_request(state, package, note),
+        Request::ListInstallRequests { status } => handle_list_install_requests(state, status),
+        Request::DecideInstallRequest { id, decision } => {
+            handle_decide_install_request(state, id, decision)
+        }
+    }
+}
+
+fn install_request_info(row: db::InstallRequestRow) -> InstallRequestInfo {
+    InstallRequestInfo {
+        id: row.id,
+        package: row.package,
+        repo: row.repo,
+        version: row.version,
+        description: row.description,
+        download_size: row.download_size,
+        note: row.note,
+        status: row.status,
+        requested_at: row.requested_at,
+        decided_at: row.decided_at,
+    }
+}
+
+/// Records a child's request to install a package. The pacman lookups run
+/// before the state lock is taken (they spawn processes and can be slow).
+fn handle_install_request(
+    state: &Arc<Mutex<State>>,
+    package: String,
+    note: Option<String>,
+) -> Response {
+    let package = package.trim().to_string();
+    if let Err(e) = installs::validate_package_name(&package) {
+        return Response::err(e);
+    }
+    let found = match installs::lookup_package(&package) {
+        Ok(found) => found,
+        Err(e) => return Response::err(e),
+    };
+    if installs::is_installed(&package) {
+        return Response::err(format!("'{package}' is already installed"));
+    }
+    let note = note.as_deref().and_then(installs::sanitize_note);
+
+    let state = state.lock().unwrap();
+    match db::pending_install_request_id(&state.db, &package) {
+        Ok(Some(id)) => {
+            return Response::err(format!(
+                "'{package}' is already waiting for approval (request #{id})"
+            ))
+        }
+        Ok(None) => {}
+        Err(e) => return Response::err(format!("failed to check existing requests: {e:#}")),
+    }
+    match db::pending_install_request_count(&state.db) {
+        Ok(n) if n >= installs::MAX_PENDING_REQUESTS => {
+            return Response::err(format!(
+                "there are already {n} requests waiting; ask a parent to look at them first"
+            ))
+        }
+        Ok(_) => {}
+        Err(e) => return Response::err(format!("failed to count requests: {e:#}")),
+    }
+
+    let new = db::NewInstallRequest {
+        package: &package,
+        repo: &found.repo,
+        version: &found.version,
+        description: &found.description,
+        download_size: &found.download_size,
+        note: note.as_deref(),
+    };
+    let id = match db::insert_install_request(&state.db, &new, Utc::now()) {
+        Ok(id) => id,
+        Err(e) => return Response::err(format!("failed to record the request: {e:#}")),
+    };
+    match db::install_request_by_id(&state.db, id) {
+        Ok(Some(row)) => Response::ok_with(install_request_info(row)),
+        Ok(None) => Response::err("the request was recorded but could not be read back"),
+        Err(e) => Response::err(format!("failed to read the request back: {e:#}")),
+    }
+}
+
+fn handle_list_install_requests(state: &Arc<Mutex<State>>, status: Option<String>) -> Response {
+    if let Some(s) = &status {
+        if !db::INSTALL_STATUSES.contains(&s.as_str()) {
+            return Response::err(format!(
+                "unknown status '{s}' (use one of: {})",
+                db::INSTALL_STATUSES.join(", ")
+            ));
+        }
+    }
+
+    // An approved request whose package has since appeared in pacman's local
+    // database has been installed: record that, so the parent's list and the
+    // child's answer catch up without anyone reporting back. The pacman
+    // lookups run outside the lock.
+    let approved = {
+        let state = state.lock().unwrap();
+        db::list_install_requests(&state.db, Some("approved"), 50).unwrap_or_default()
+    };
+    for row in approved {
+        if installs::is_installed(&row.package) {
+            let state = state.lock().unwrap();
+            let _ = db::mark_install_request_installed(&state.db, row.id, Utc::now());
+        }
+    }
+
+    let state = state.lock().unwrap();
+    match db::list_install_requests(&state.db, status.as_deref(), 50) {
+        Ok(rows) => Response::ok_with(InstallRequestsPayload {
+            requests: rows.into_iter().map(install_request_info).collect(),
+        }),
+        Err(e) => Response::err(format!("failed to read install requests: {e:#}")),
+    }
+}
+
+fn handle_decide_install_request(
+    state: &Arc<Mutex<State>>,
+    id: i64,
+    decision: String,
+) -> Response {
+    let new_status = match decision.as_str() {
+        "approve" => "approved",
+        "deny" => "denied",
+        _ => return Response::err("decision must be 'approve' or 'deny'"),
+    };
+    let state = state.lock().unwrap();
+    match db::decide_pending_install_request(&state.db, id, new_status, Utc::now()) {
+        Ok(true) => Response::ok_empty(),
+        Ok(false) => Response::err(format!("there is no pending install request #{id}")),
+        Err(e) => Response::err(format!("failed to record the decision: {e:#}")),
     }
 }
 
@@ -390,5 +521,6 @@ mod tests {
     fn known_tiers_rejects_unrecognized_names() {
         assert!(!KNOWN_TIERS.contains(&"midi"));
         assert!(KNOWN_TIERS.contains(&"mini"));
+        assert!(KNOWN_TIERS.contains(&"maxi"));
     }
 }

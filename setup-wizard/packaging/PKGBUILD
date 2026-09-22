@@ -6,6 +6,9 @@ pkgdesc="Omarchy Kids setup wizard and bootstrap scripts"
 arch=('any')
 url="https://github.com/jfuerwentsches/omarchy-kids"
 license=('MIT')
+# Scriptlet functions must live in this separate file to be packaged (see the
+# agent PKGBUILD's note).
+install=omarchy-kids-setup-wizard.install
 depends=('bash' 'gum' 'jq' 'sudo' 'omarchy-kids-tiers' 'omarchy-kids-agent')
 source=()
 sha256sums=()
@@ -38,16 +41,4 @@ package() {
 
   install -Dm644 first-boot/omarchy-kids-setup-wizard.service \
     "$pkgdir/usr/lib/systemd/system/omarchy-kids-setup-wizard.service"
-}
-
-post_install() {
-  systemctl enable omarchy-kids-setup-wizard.service || true
-}
-
-post_upgrade() {
-  post_install
-}
-
-post_remove() {
-  systemctl disable omarchy-kids-setup-wizard.service || true
 }

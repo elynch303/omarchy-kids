@@ -29,6 +29,11 @@ struct HostEntry {
     // TOFU. Empty for hosts paired before this field existed; AgentClient
     // falls back to accept-new TOFU for those (see its own comment).
     std::string sshHostPublicKey;
+    // The account on the child's computer that has admin rights (`sudo`), used
+    // to run an approved install. Not the child's own account (`username`) and
+    // not the paired key's account; asked for the first time an install is
+    // approved, then remembered here. Empty until then.
+    std::string adminUser;
 };
 
 // Manages the list of known child hosts, persisted as TOML at
@@ -47,6 +52,12 @@ public:
     // name (re-pairing the same child — e.g. after a DHCP lease changed its
     // address) rather than creating a duplicate.
     void addHost(const HostEntry& entry);
+
+    // Forgets the host with this name and persists the change. Returns false
+    // (and changes nothing) if no host has that name. Only touches this
+    // registry's TOML: deleting the host's key files, and the matching line
+    // in the child's authorized_keys, are the caller's / the parent's job.
+    bool removeHost(const std::string& name);
 
     static std::filesystem::path defaultConfigPath();
 

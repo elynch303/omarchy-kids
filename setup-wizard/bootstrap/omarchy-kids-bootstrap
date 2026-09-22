@@ -12,11 +12,14 @@
 #     --tier <tier> \
 #     [--theme <theme-id>] \
 #     [--admin-user <name>] \
-#     [--admin-password <password>]
+#     [--admin-password <password> | --admin-password-file <path>]
 #
-# --admin-user defaults to omarchy-kids-parent. --admin-password defaults
-# to a generated one, printed once — Phase 1 has no UI to prompt for it
-# interactively (see lib/account.sh); Phase 2's form replaces this.
+# --admin-user defaults to omarchy-kids-parent. For a NEW admin account with
+# no password option given, a password is generated and printed once — Phase
+# 1 has no UI to prompt for it interactively (see lib/account.sh); Phase 2's
+# form replaces this. For an EXISTING admin account with none given, its
+# password is left alone. Prefer --admin-password-file over --admin-password:
+# a password on the command line ends up in shell history and `ps`.
 #
 # Must run as root: creates a Linux account and writes into another
 # account's home directory.
@@ -35,7 +38,7 @@ usage() {
   cat >&2 <<'EOF'
 Usage: omarchy-kids-bootstrap --child-user <user> --child-name "<name>" --tier <tier>
                                [--theme <theme-id>] [--admin-user <name>]
-                               [--admin-password <password>]
+                               [--admin-password <password> | --admin-password-file <path>]
 EOF
 }
 
@@ -45,6 +48,7 @@ TIER=""
 THEME=""
 ADMIN_USER="$OMARCHY_KIDS_ADMIN_USER_DEFAULT"
 ADMIN_PASSWORD=""
+ADMIN_PASSWORD_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +58,7 @@ while [[ $# -gt 0 ]]; do
     --theme) THEME="$2"; shift 2 ;;
     --admin-user) ADMIN_USER="$2"; shift 2 ;;
     --admin-password) ADMIN_PASSWORD="$2"; shift 2 ;;
+    --admin-password-file) ADMIN_PASSWORD_FILE="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
   esac
@@ -75,9 +80,26 @@ if ! id "$CHILD_USER" >/dev/null 2>&1; then
 fi
 
 GENERATED_PASSWORD=0
+if [[ -n $ADMIN_PASSWORD_FILE ]]; then
+  if [[ ! -r $ADMIN_PASSWORD_FILE ]]; then
+    echo "omarchy-kids-bootstrap: cannot read --admin-password-file '$ADMIN_PASSWORD_FILE'" >&2
+    exit 1
+  fi
+  ADMIN_PASSWORD="$(head -n 1 "$ADMIN_PASSWORD_FILE")"
+  if [[ -z $ADMIN_PASSWORD ]]; then
+    echo "omarchy-kids-bootstrap: '$ADMIN_PASSWORD_FILE' is empty" >&2
+    exit 1
+  fi
+fi
 if [[ -z $ADMIN_PASSWORD ]]; then
-  ADMIN_PASSWORD="$(generate_admin_password)"
-  GENERATED_PASSWORD=1
+  if id "$ADMIN_USER" >/dev/null 2>&1; then
+    # Re-running for an existing admin must not silently replace a password
+    # the parent chose (or make up one nobody has seen).
+    echo "omarchy-kids-bootstrap: '$ADMIN_USER' already exists; leaving its password unchanged" >&2
+  else
+    ADMIN_PASSWORD="$(generate_admin_password)"
+    GENERATED_PASSWORD=1
+  fi
 fi
 
 # Account/sudo adjustments run BEFORE the tier switch below: set-tier's VT
@@ -87,13 +109,35 @@ fi
 # non-interactive sudo call has no tty to prompt on even beforehand.
 echo "omarchy-kids-bootstrap: setting up parent/admin account ('$ADMIN_USER')..." >&2
 create_parent_admin_account "$CHILD_USER" "$ADMIN_USER" "$ADMIN_PASSWORD"
+# Show a generated password immediately, not at the end: the child has just
+# lost `wheel`, so if any later step fails (set -e), this is the only admin
+# login on the machine and it must not be left unseen.
+if [[ $GENERATED_PASSWORD -eq 1 ]]; then
+  echo "omarchy-kids-bootstrap: generated admin password for '$ADMIN_USER': $ADMIN_PASSWORD" >&2
+  echo "omarchy-kids-bootstrap: record this now — it is not stored or shown again." >&2
+fi
 grant_getty_lockdown_sudo "$CHILD_USER"
+grant_tier_apply_sudo "$CHILD_USER"
 
 echo "omarchy-kids-bootstrap: applying branding and initial tier ('$TIER')..." >&2
 apply_branding_and_tier "$CHILD_USER" "$CHILD_NAME" "$TIER" "$THEME"
 
 echo "omarchy-kids-bootstrap: preparing SSH for pairing..." >&2
 prepare_agent_ssh_dir "$CHILD_USER"
+
+# The Control Center reaches this computer over SSH, and Omarchy ships sshd
+# disabled, so without this pairing can succeed while every later connection
+# is refused. Turning the server on is not enough to lock it down: password
+# logins stay as configured until the parent restricts them (key-only, allowed
+# users) once their own key is installed — that step is left to the parent.
+if ! systemctl is-enabled --quiet sshd.service 2>/dev/null; then
+  echo "omarchy-kids-bootstrap: enabling the SSH server (needed for the Control Center)..." >&2
+  systemctl enable --now sshd.service >&2 || echo "omarchy-kids-bootstrap: WARNING — could not enable sshd.service" >&2
+fi
+
+# LAST, after the tier and SSH steps that ran as / needed the child: take away
+# the full sudo rule Omarchy's installer gave the child's account.
+revoke_child_full_sudo "$CHILD_USER"
 
 # UFW's SSH allow rule is intentionally NOT duplicated here — it's already
 # applied by omarchy-kids-agent's own package post_install (see
@@ -109,7 +153,3 @@ if command -v ufw >/dev/null && ufw status | grep -q "^Status: active"; then
 fi
 
 echo "omarchy-kids-bootstrap: done." >&2
-if [[ $GENERATED_PASSWORD -eq 1 ]]; then
-  echo "omarchy-kids-bootstrap: generated admin password for '$ADMIN_USER': $ADMIN_PASSWORD" >&2
-  echo "omarchy-kids-bootstrap: record this now — it is not stored or shown again." >&2
-fi

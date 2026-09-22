@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "install_request_feed.h"
 #include "main_window.h"
 
 #include "omarchy-kids-control/poll_runner.h"
@@ -21,6 +22,10 @@ int main(int argc, char *argv[]) {
     for (int i = 1; i < argc; ++i) {
         if (std::string(argv[i]) == "--poll") {
             omarchy_kids::control::runStatusPoll();
+            // Also look for install requests waiting for an answer, so a
+            // notification arrives even while the Control Center window is
+            // closed (same timer, same headless mode).
+            pollInstallRequestsHeadless();
             return 0;
         }
     }

@@ -6,6 +6,9 @@ pkgdesc="Omarchy Kids parent-side Control Center (core, GUI, status poll)"
 arch=('x86_64' 'aarch64')
 url="https://github.com/jfuerwentsches/omarchy-kids"
 license=('MIT')
+# Scriptlet functions must live in this separate file to be packaged (see the
+# agent PKGBUILD's note).
+install=omarchy-kids-control.install
 depends=('qt6-base' 'tomlplusplus')
 makedepends=('cmake' 'ninja')
 checkdepends=('gtest')
@@ -40,16 +43,4 @@ package() {
     "$pkgdir/usr/lib/systemd/user/omarchy-kids-control-poll.service"
   install -Dm644 packaging/systemd/omarchy-kids-control-poll.timer \
     "$pkgdir/usr/lib/systemd/user/omarchy-kids-control-poll.timer"
-}
-
-post_install() {
-  systemctl --global enable omarchy-kids-control-poll.timer || true
-}
-
-post_upgrade() {
-  post_install
-}
-
-post_remove() {
-  systemctl --global disable omarchy-kids-control-poll.timer || true
 }

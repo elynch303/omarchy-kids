@@ -1,0 +1,128 @@
+# Omarchy Kids — tier maxi (11-13) shell surfaces.
+# Same surfaces as the mini tier's shell.toml, but at normal size: a
+# regular desktop for a reader, not a kiosk for a pre-reader.
+
+[bar]
+background       = "#0E1420"
+background-alpha = 1.0
+text             = "#E6EAF2"
+active           = "#6EA8FE"
+scale-with-font  = true
+size-horizontal  = 28
+size-vertical    = 28
+
+[hyprland]
+active-border            = "rgba(6ea8feee)"
+active-border-foreground = "rgba(6ea8feee)"
+
+[controls]
+normal-color        = "#E6EAF2"
+normal-fill-alpha   = 0.06
+normal-border       = "#E6EAF2"
+normal-border-width = 1
+normal-border-alpha = 0.3
+
+hover-cursor-color        = "#6EA8FE"
+hover-cursor-fill-alpha   = 0.18
+hover-cursor-border       = "#6EA8FE"
+hover-cursor-border-width = 1
+hover-cursor-border-alpha = 0.6
+
+focus-color        = "#6EA8FE"
+focus-fill-alpha   = 0.18
+focus-border       = "#6EA8FE"
+focus-border-width = 1
+focus-border-alpha = 0.6
+
+selected-color        = "#6EA8FE"
+selected-fill-alpha   = 0.28
+selected-border       = "#6EA8FE"
+selected-border-width = 0
+selected-border-alpha = 1.0
+
+pressed-fill-alpha   = 0.22
+selection-fill-alpha = 0.35
+
+[spacing]
+scale           = 1.0
+scale-with-font = true
+
+[font]
+base-size = 13
+
+[popups]
+background       = "#1F2937"
+background-alpha = 1.0
+text             = "#E6EAF2"
+border           = "hyprland.active-border"
+border-alpha     = 1.0
+
+[notifications]
+background       = "#1F2937"
+background-alpha = 1.0
+text             = "#E6EAF2"
+border           = "hyprland.active-border"
+border-alpha     = 1.0
+countdown        = "#6EA8FE"
+
+[launcher]
+background                = "#1F2937"
+background-alpha          = 0.98
+text                      = "#E6EAF2"
+border                    = "hyprland.active-border-foreground"
+border-alpha              = 1.0
+scrim                     = "#0A0F18"
+scrim-alpha               = 0.5
+selected-background       = "#6EA8FE"
+selected-background-alpha = 1.0
+selected-text              = "#0E1420"
+selected-border            = "#6EA8FE"
+selected-border-alpha      = 1.0
+
+[menu]
+background                = "#1F2937"
+background-alpha          = 1.0
+text                      = "#E6EAF2"
+border                    = "hyprland.active-border-foreground"
+border-alpha              = 1.0
+scrim                     = "#0A0F18"
+scrim-alpha               = 0.5
+selected-background       = "#6EA8FE"
+selected-background-alpha = 1.0
+selected-text              = "#0E1420"
+selected-border            = "#6EA8FE"
+selected-border-alpha      = 1.0
+
+[polkit]
+background       = "#1F2937"
+background-alpha = 1.0
+text             = "#E6EAF2"
+text-error       = "#F2777A"
+border           = "hyprland.active-border"
+border-error     = "#F2777A"
+border-alpha     = 1.0
+scrim            = "#0A0F18"
+scrim-alpha      = 0.5
+accent           = "#6EA8FE"
+
+[lock]
+background       = "#1F2937"
+background-alpha = 0.95
+text             = "#E6EAF2"
+placeholder      = "#7C8799"
+text-error       = "#F2777A"
+border           = "hyprland.active-border"
+border-active    = "hyprland.active-border"
+border-error     = "#F2777A"
+border-alpha     = 1.0
+selection        = "#6EA8FE"
+selection-alpha  = 0.5
+
+[image-picker]
+scrim                   = "#0A0F18"
+scrim-alpha             = 0.5
+text                    = "#E6EAF2"
+selected-border         = "#6EA8FE"
+selected-border-alpha   = 1.0
+unselected-border       = "#E6EAF2"
+unselected-border-alpha = 0.3

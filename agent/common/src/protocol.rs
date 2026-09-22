@@ -81,6 +81,28 @@ pub enum Request {
     PushContent {
         content_type: String,
     },
+    /// The child asks a parent to approve installing a package. agentd checks
+    /// the name and looks the package up in the *synced pacman repositories*
+    /// (the official ones plus Omarchy's own — AUR packages are never in
+    /// them, so they are refused). Recording a request installs nothing: the
+    /// install itself needs admin rights this account does not have.
+    InstallRequest {
+        package: String,
+        note: Option<String>,
+    },
+    /// List install requests, newest first. `status`, when given, filters to
+    /// one of `pending`, `approved`, `denied`, `installed`.
+    ListInstallRequests {
+        status: Option<String>,
+    },
+    /// A parent's decision on a pending request: `approve` or `deny`. This is
+    /// only a record the child can read — anyone able to send it (including
+    /// the child, over the same socket) gains nothing, because the actual
+    /// install still needs the admin account's password.
+    DecideInstallRequest {
+        id: i64,
+        decision: String,
+    },
 }
 
 pub const DEFAULT_UNLOCK_MINUTES: u32 = 30;
@@ -162,4 +184,28 @@ pub struct SecurityEventSummary {
     pub event_type: String,
     pub severity: String,
     pub detail: Option<String>,
+}
+
+/// One install request. `note` is free text typed by the child — display it
+/// as plain text, never as markup.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallRequestInfo {
+    pub id: i64,
+    pub package: String,
+    /// Which pacman repository has it (`extra`, `omarchy`, ...).
+    pub repo: String,
+    pub version: String,
+    pub description: String,
+    /// As pacman prints it, e.g. `34.20 MiB`.
+    pub download_size: String,
+    pub note: Option<String>,
+    /// `pending`, `approved`, `denied`, or `installed`.
+    pub status: String,
+    pub requested_at: String,
+    pub decided_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstallRequestsPayload {
+    pub requests: Vec<InstallRequestInfo>,
 }

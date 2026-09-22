@@ -338,6 +338,15 @@ fn handle_connection(
     )?;
     proto::write_message(&mut writer, &confirm)?;
 
+    // A human now has to compare this fingerprint with the one the Control
+    // Center shows and click "Yes" — far slower than the machine-speed
+    // handshake the 30 s read timeout above was sized for. (Before this, a
+    // parent who took longer than 30 s got a saved pairing on their side and
+    // no key installed here.) Print the fingerprint so there is actually
+    // something on this screen to compare against, and allow five minutes.
+    println!("Key fingerprint to confirm: {fingerprint}");
+    writer.set_read_timeout(Some(Duration::from_secs(300)))?;
+
     let ack_msg = proto::read_message(&mut reader)?;
     let ack = proto::decrypt(&shared_key, &ack_msg)?;
     match ack {

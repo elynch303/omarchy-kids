@@ -28,6 +28,11 @@ class PairingDialog : public QDialog {
 public:
     explicit PairingDialog(omarchy_kids::control::HostRegistry& registry, QWidget* parent = nullptr);
 
+    // Where this app keeps the keypair it generates for each paired child.
+    // Shared with MainWindow so that removing a pairing only ever deletes
+    // files from this one directory.
+    static QString keysDirectory();
+
 private slots:
     void startPairing();
     void handleStdout();
