@@ -14,6 +14,9 @@ What this tier deliberately does **not** do (yet):
 
 - **Screen-time limits.** The agent enforces time budgets only for apps launched through its wrapper (`omarchy-kids-run`). Apps started from the normal Omarchy menu bypass it, so no budget applies here. `omarchy-kids-agent`/the Control Center still report status.
 - **Content filtering.** Not part of this tier (see the DNS-filter work).
-- **Hide or trim the menu's Install entries.** Possible later through `~/.config/omarchy/extensions/menu.sh`.
+
+Installs are not simply refused, though: the Omarchy menu's Install entry is replaced (via `menu/menu.sh`, an `~/.config/omarchy/extensions/menu.sh` override) with `omarchy-kids-request-install`, which lets the child ask a parent to approve installing an official/Omarchy-repo package — see the agent's `InstallRequest`/`DecideInstallRequest` messages and the Control Center's "Install requests" panel. AUR packages can never be requested.
+
+`themes/`: `standard` (default, calm dark blue) plus five ages-11-12/9-12 themes (`bubblegum`, `kinetic-zine`, `night-transit`, `pocket-arcade`, `signal-garden`) pulled from upstream Omarchy PR [#12488](https://github.com/omacom/omarchy/pull/12488) ("Add Omarchy Kids theme collection", OldJobobo, draft) — see each theme's own `ATTRIBUTION.md`/`LICENSE` (MIT).
 
 Switching *to* this tier from `mini` undoes the kiosk (Hyprland config, launcher plugin, console masks) — see `omarchy-kids-set-tier`.
