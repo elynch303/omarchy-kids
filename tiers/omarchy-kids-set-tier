@@ -16,7 +16,10 @@
 # Only tier "mini" (age 5-7) is implemented so far — see tiers/mini/.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks first: the package installs this script under
+# /usr/lib/omarchy-kids/tiers/ and only symlinks it into /usr/bin, and the
+# tier directories are siblings of the real file, not of the symlink.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 TIER="${1:-}"
 THEME_ID_ARG="${2:-}"
 
@@ -73,6 +76,17 @@ fi
 
 omarchy-theme-set "$THEME_NAME"
 
+# A "kiosk" tier is one that ships its own Hyprland config (stripped key
+# bindings, launcher instead of the normal menu). Everything below that only
+# makes sense for a locked-down kiosk keys off this — a tier is the files in
+# its folder, not a name this script checks. Tiers without those files (e.g.
+# maxi) get the normal desktop, and switching to one undoes the kiosk.
+KIOSK=0
+if [[ -f "$TIER_DIR/hypr/hyprland.lua" ]]; then
+  KIOSK=1
+fi
+RESTART_SHELL=0
+
 # Launcher plugin + its app list, if this tier ships one. Third-party
 # overlay/menu plugins are opt-in in Omarchy: dropping the plugin directory
 # into ~/.config/omarchy/plugins/ is not enough on its own, it also has to
@@ -106,19 +120,66 @@ if [[ -d "$TIER_DIR/launcher" ]]; then
       cp "$TIER_DIR/launcher/apps.json" "$HOME/.config/omarchy-kids/launcher-apps.json"
     fi
   fi
+  RESTART_SHELL=1
+else
+  # This tier has no launcher. If a previous tier installed one, take it
+  # back out: delete the plugin and its shell.json entry.
+  LAUNCHER_PLUGIN_ID="omarchy-kids.launcher"
+  SHELL_JSON="$HOME/.config/omarchy/shell.json"
+  if [[ -d "$HOME/.config/omarchy/plugins/$LAUNCHER_PLUGIN_ID" ]]; then
+    rm -rf "$HOME/.config/omarchy/plugins/$LAUNCHER_PLUGIN_ID"
+    if [[ -f $SHELL_JSON ]]; then
+      tmp_json="$(mktemp)"
+      jq --arg id "$LAUNCHER_PLUGIN_ID" \
+        '.plugins = ((.plugins // []) | map(select((type == "object" and .id == $id) | not)))' \
+        "$SHELL_JSON" > "$tmp_json" && mv "$tmp_json" "$SHELL_JSON"
+    fi
+    RESTART_SHELL=1
+  fi
+  # Still tell agentd which tier is active (its status/report show it); there
+  # is no app list to hand over for a tier without a launcher.
+  omarchy-kids-agent set-tier "$TIER" >/dev/null 2>&1 || true
 fi
 
 # Hyprland kiosk bindings, if this tier ships an override. The stock config
 # is backed up once so it can be restored when moving to a tier that
 # doesn't ship its own hyprland.lua.
-if [[ -f "$TIER_DIR/hypr/hyprland.lua" ]]; then
-  HYPR_CONF="$HOME/.config/hypr/hyprland.lua"
-  HYPR_BACKUP="$HYPR_CONF.pre-omarchy-kids"
+HYPR_CONF="$HOME/.config/hypr/hyprland.lua"
+HYPR_BACKUP="$HYPR_CONF.pre-omarchy-kids"
+if [[ $KIOSK -eq 1 ]]; then
   if [[ -f $HYPR_CONF && ! -f $HYPR_BACKUP ]]; then
     cp "$HYPR_CONF" "$HYPR_BACKUP"
   fi
   cp "$TIER_DIR/hypr/hyprland.lua" "$HYPR_CONF"
   hyprctl reload >/dev/null 2>&1 || true
+elif [[ -f $HYPR_BACKUP ]]; then
+  # Leaving a kiosk tier: put the stock config back.
+  mv -f "$HYPR_BACKUP" "$HYPR_CONF"
+  hyprctl reload >/dev/null 2>&1 || true
+fi
+
+# Omarchy menu override, if this tier ships one (tiers/<tier>/menu/menu.sh).
+# omarchy-menu sources ~/.config/omarchy/extensions/menu.sh after defining its
+# own functions, which is the supported way to change what its menus do. Used
+# by tier maxi to turn the Install menu into "ask a parent" (the account has
+# no admin rights, so the normal one could only fail).
+# A file of the user's own is backed up once. A file of ours is recognised by
+# its marker line, so switching to a tier without a menu override removes
+# exactly what we installed and nothing else.
+MENU_EXT="$HOME/.config/omarchy/extensions/menu.sh"
+MENU_EXT_BACKUP="$MENU_EXT.pre-omarchy-kids"
+MENU_MARKER="omarchy-kids-tier-menu"
+if [[ -f "$TIER_DIR/menu/menu.sh" ]]; then
+  mkdir -p "$(dirname "$MENU_EXT")"
+  if [[ -f $MENU_EXT && ! -f $MENU_EXT_BACKUP ]] && ! grep -q "$MENU_MARKER" "$MENU_EXT"; then
+    cp "$MENU_EXT" "$MENU_EXT_BACKUP"
+  fi
+  cp "$TIER_DIR/menu/menu.sh" "$MENU_EXT"
+elif [[ -f $MENU_EXT ]] && grep -q "$MENU_MARKER" "$MENU_EXT"; then
+  rm -f "$MENU_EXT"
+  if [[ -f $MENU_EXT_BACKUP ]]; then
+    mv -f "$MENU_EXT_BACKUP" "$MENU_EXT"
+  fi
 fi
 
 # First-run replacement (issue #30), if this tier ships one: Omarchy's own
@@ -139,6 +200,10 @@ if [[ -f "$TIER_DIR/hypr/autostart.lua" ]]; then
   cp "$TIER_DIR/hypr/autostart.lua" "$AUTOSTART_CONF"
   omarchy-done mark first-run-user
   hyprctl reload >/dev/null 2>&1 || true
+elif [[ -f "$HOME/.config/hypr/autostart.lua.pre-omarchy-kids" ]]; then
+  # Moving to a tier with no first-run replacement: restore the original.
+  mv -f "$HOME/.config/hypr/autostart.lua.pre-omarchy-kids" "$HOME/.config/hypr/autostart.lua"
+  hyprctl reload >/dev/null 2>&1 || true
 fi
 
 # VT lockdown: this tier has no terminal, so Ctrl+Alt+F<n> switching to a
@@ -146,8 +211,13 @@ fi
 # — the kiosk restriction is a UI-layer thing otherwise, not an access
 # control. Mask the gettys for the unused VTs; VT1 (the graphical session)
 # stays untouched.
-if [[ $TIER == "mini" ]]; then
+if [[ $KIOSK -eq 1 ]]; then
   sudo systemctl mask --now getty@tty2.service getty@tty3.service getty@tty4.service getty@tty5.service getty@tty6.service >/dev/null 2>&1 || true
+else
+  # A tier with a normal desktop has a terminal anyway, so masking the
+  # consoles gains nothing; and when coming from a kiosk tier they must be
+  # given back. Harmless if they were never masked.
+  sudo systemctl unmask getty@tty2.service getty@tty3.service getty@tty4.service getty@tty5.service getty@tty6.service >/dev/null 2>&1 || true
 fi
 
 # Autonomous OS updates (issue #31): this tier suppresses Omarchy's own
@@ -155,7 +225,7 @@ fi
 # this machine would never update at all. Decided: fully autonomous, no
 # parent/Control-Center trigger -- install + enable a system-level timer
 # that runs `omarchy-update -y` unattended on its own schedule.
-if [[ $TIER == "mini" && -d "$TIER_DIR/systemd" ]]; then
+if [[ -d "$TIER_DIR/systemd" ]]; then
   sudo install -Dm644 "$TIER_DIR/systemd/omarchy-kids-update.service" \
     /etc/systemd/system/omarchy-kids-update.service
   sudo install -Dm644 "$TIER_DIR/systemd/omarchy-kids-update.timer" \
@@ -178,13 +248,13 @@ fi
 # defeating the whole point of the lockdown. Hide it for tiers with a kiosk
 # launcher; the launcher grid carries its own power-off tile (Launcher.qml)
 # so losing the bar doesn't also lose the ability to shut the machine down.
-if [[ $TIER == "mini" ]]; then
+if [[ $KIOSK -eq 1 ]]; then
   omarchy-toggle-bar on >/dev/null 2>&1 || true
 else
   omarchy-toggle-bar off >/dev/null 2>&1 || true
 fi
 
-if [[ -d "$TIER_DIR/launcher" ]]; then
+if [[ $RESTART_SHELL -eq 1 ]]; then
   # Quickshell's own live plugin reload ("Local plugin changed, reloading")
   # doesn't reliably pick up structural QML changes (new/changed component
   # trees) — observed hanging onto stale layout after a plugin's first

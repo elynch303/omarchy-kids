@@ -1,0 +1,11 @@
+#!/bin/bash
+# Omarchy Kids: shadows the real /usr/bin/omarchy-pkg-install for this
+# account (see tiers/maxi/hypr/autostart.lua for how this directory reaches
+# PATH ahead of the real one, and why — this file is never installed
+# anywhere the real binary's own directory would find it first).
+#
+# The real command needs admin rights this account doesn't have and would
+# just dead-end at a sudo prompt; this redirects straight to the
+# request-approval flow instead, landing on the same screen whether the kid
+# got here from the terminal or the native Omarchy menu's Install > Package.
+exec omarchy-kids-request-install package

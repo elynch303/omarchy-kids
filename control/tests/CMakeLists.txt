@@ -10,6 +10,7 @@ include(GoogleTest)
 add_executable(omarchy-kids-control-core-tests
     status_cache_test.cpp
     host_registry_test.cpp
+    install_requests_test.cpp
 )
 
 target_link_libraries(omarchy-kids-control-core-tests PRIVATE

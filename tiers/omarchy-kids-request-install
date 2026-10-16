@@ -1,0 +1,91 @@
+#!/bin/bash
+# The child-facing "ask a parent to install something" screen (tier maxi):
+# a package, an Omarchy theme, or a plugin.
+#
+# The child account has no admin rights, so it cannot install anything
+# itself. This asks the local agent to record a request. If the name is
+# already on the parent's allow-list (`~/.config/omarchy-kids/
+# installable.toml`) it installs right away, no password prompt at all; see
+# docs/security-threat-model.md's boundary 5. Otherwise — packages only — a
+# parent sees it in the Control Center (with a desktop notification),
+# approves or denies it, and installs an approved one with their admin
+# account. Only packages from the official or Omarchy repositories can ever
+# be requested (never the AUR); a theme/plugin not already allow-listed is
+# refused outright, since there's no safe way to look up an arbitrary one —
+# see `omarchy_kids_common::protocol::InstallRequest`'s doc comment.
+#
+# Reachable as a terminal command, and also as what the native Omarchy
+# Install menu's Package/AUR/Theme/TUI entries actually run on this account
+# (see tiers/maxi/hypr/autostart.lua and tiers/maxi/menu-wrappers/ — the real
+# omarchy-pkg-install etc. are shadowed via PATH, never edited).
+#
+# An optional first argument (`package`, `theme`, or `plugin`) jumps straight
+# into that one ask flow and exits after it, instead of the interactive
+# top-level menu below — what a menu-wrapper script uses so the kid lands
+# directly on the right screen for what they clicked, not a generic chooser.
+set -u
+
+pause() {
+  echo
+  read -rp "Press Enter to continue... " _
+}
+
+ask_for(){
+  local kind="$1" label="$2" hint="$3"
+  echo
+  echo "$hint"
+  local name note
+  name="$(gum input --placeholder "$label name" --prompt "$label> ")" || return 0
+  name="${name//[[:space:]]/}"
+  [[ -n $name ]] || return 0
+  note="$(gum input --placeholder 'Why do you want it? (optional)' --prompt 'Note> ')" || note=""
+  echo
+  # `--` so a name that starts with "-" can never be read as an option.
+  if [[ -n $note ]]; then
+    omarchy-kids-agent request-install --kind "$kind" --note "$note" -- "$name"
+  else
+    omarchy-kids-agent request-install --kind "$kind" -- "$name"
+  fi
+  pause
+}
+
+ask_for_program() {
+  ask_for package Program "Type the name of the program. Use its package name, for example: gimp"
+}
+
+ask_for_theme() {
+  ask_for theme Theme "Type the name of the theme your parent already allowed. A theme your parent hasn't set up yet can't be requested here — ask them directly."
+}
+
+ask_for_plugin() {
+  ask_for plugin Plugin "Type the name of the plugin your parent already allowed. A plugin your parent hasn't set up yet can't be requested here — ask them directly."
+}
+
+show_requests() {
+  echo
+  omarchy-kids-agent requests || echo "Could not reach the Kids agent."
+  pause
+}
+
+case "${1:-}" in
+  package) ask_for_program; exit 0 ;;
+  theme) ask_for_theme; exit 0 ;;
+  plugin) ask_for_plugin; exit 0 ;;
+  '') ;;
+  *)
+    echo "Unknown kind '$1' (use package, theme, or plugin)" >&2
+    exit 1
+    ;;
+esac
+
+while true; do
+  choice="$(gum choose --header 'Ask a parent to install something' \
+    'Ask for a program' 'Ask for a theme' 'Ask for a plugin' 'See my requests' 'Close')" || exit 0
+  case $choice in
+    'Ask for a program') ask_for_program ;;
+    'Ask for a theme') ask_for_theme ;;
+    'Ask for a plugin') ask_for_plugin ;;
+    'See my requests') show_requests ;;
+    *) exit 0 ;;
+  esac
+done

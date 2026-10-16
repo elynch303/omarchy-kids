@@ -1,0 +1,35 @@
+# Omarchy Kids — tier maxi (11-13), "Standard" theme.
+# A calm, normal-looking dark theme: this tier is a regular Omarchy desktop
+# (bar, menu, key bindings) with guardrails, not a kiosk, so nothing here is
+# oversized or childlike.
+mode = "dark"
+
+accent = "#6EA8FE"
+selection = "#FFFFFF"
+muted = "#7C8799"
+
+background = "#141B26"
+dark_background = "#0E1420"
+darker_background = "#0A0F18"
+lighter_background = "#1F2937"
+
+foreground = "#E6EAF2"
+dark_foreground = "#B6BFCF"
+light_foreground = "#F1F4FA"
+bright_foreground = "#FFFFFF"
+
+red = "#F2777A"
+yellow = "#E5C07B"
+orange = "#F0A35E"
+green = "#7FD18B"
+cyan = "#56C2D6"
+blue = "#6EA8FE"
+magenta = "#C79BF2"
+brown = "#B58863"
+
+bright_red = "#FF9A9C"
+bright_yellow = "#F2D89B"
+bright_green = "#A1E6AA"
+bright_cyan = "#86DCEB"
+bright_blue = "#9CC4FF"
+bright_magenta = "#DDBBFA"

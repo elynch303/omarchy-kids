@@ -1,0 +1,26 @@
+post_install() {
+  # Per-user systemd unit: --global enables it for every user account
+  # (present and future) without needing a specific logged-in session to
+  # target — the setup wizard is expected to `systemctl --user start` it (or
+  # a fresh login will, since `graphical-session.target` pulls it in) for
+  # the child account specifically once that account exists.
+  systemctl --global enable omarchy-kids-agentd.service || true
+
+  # Omarchy ships UFW active with inbound SSH blocked by default (verified
+  # in the dev VM — see CLAUDE.md). Without this, the Control Center's
+  # `agent` connections never arrive, independent of the SSH key/pairing
+  # setup. `agent` itself is invoked via a `command=`-restricted key in
+  # authorized_keys, not a separate port, so this is just the standard SSH
+  # allow rule.
+  if command -v ufw >/dev/null && ufw status | grep -q "^Status: active"; then
+    ufw allow ssh || true
+  fi
+}
+
+post_upgrade() {
+  post_install
+}
+
+post_remove() {
+  systemctl --global disable omarchy-kids-agentd.service || true
+}

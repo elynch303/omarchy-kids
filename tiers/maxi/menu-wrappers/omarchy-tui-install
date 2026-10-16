@@ -1,0 +1,6 @@
+#!/bin/bash
+# Omarchy Kids: shadows the real /usr/bin/omarchy-tui-install (Install > TUI
+# in the native Omarchy menu — a curses package browser). Same reasoning as
+# the omarchy-pkg-install wrapper in this directory: it's just another way to
+# reach the same "install a package" action, so it redirects the same place.
+exec omarchy-kids-request-install package

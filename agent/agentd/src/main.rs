@@ -7,6 +7,7 @@ mod allowlist;
 mod budget;
 mod db;
 mod handlers;
+mod installs;
 mod launcher;
 mod prewarning;
 mod security;

@@ -4,6 +4,8 @@
 
 pub mod config;
 pub mod desktop;
+pub mod install_validate;
+pub mod installable;
 pub mod paths;
 pub mod protocol;
 pub mod transport;

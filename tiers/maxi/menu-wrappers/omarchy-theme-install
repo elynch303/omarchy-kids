@@ -1,0 +1,8 @@
+#!/bin/bash
+# Omarchy Kids: shadows the real /usr/bin/omarchy-theme-install (Install >
+# Style > Theme in the native Omarchy menu). The real command clones an
+# arbitrary caller-supplied git URL with no catalog or signing — see
+# docs/security-threat-model.md's allow-listed-install boundary for why a
+# theme can only ever be requested by name, resolved against a parent-pinned
+# URL, never a URL this account provides itself.
+exec omarchy-kids-request-install theme

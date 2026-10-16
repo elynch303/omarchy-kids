@@ -1,0 +1,13 @@
+[package]
+name = "omarchy-kids-install-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "omarchy-kids-install-helper"
+path = "src/main.rs"
+
+[dependencies]
+omarchy-kids-common.workspace = true
+clap.workspace = true

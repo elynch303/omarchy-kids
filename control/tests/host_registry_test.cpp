@@ -117,6 +117,56 @@ TEST(HostRegistry, ReAddingSameNameUpdatesInPlaceRatherThanDuplicating) {
     EXPECT_EQ(registry.hosts()[0].hostname, "192.168.1.99");
 }
 
+TEST(HostRegistry, AdminUserPersistsAndDefaultsToEmptyForOlderFiles) {
+    auto path = tempRegistryPath("admin-user");
+    std::filesystem::remove_all(path.parent_path());
+    {
+        HostRegistry registry(path);
+        HostEntry entry = sampleHost("Testkind");
+        entry.adminUser = "evan";
+        registry.addHost(entry);
+    }
+    HostRegistry reloaded(path);
+    ASSERT_EQ(reloaded.hosts().size(), 1u);
+    EXPECT_EQ(reloaded.hosts()[0].adminUser, "evan");
+
+    // A hosts.toml written before this field existed has no admin_user key.
+    std::filesystem::create_directories(path.parent_path());
+    std::ofstream(path, std::ios::trunc)
+        << "[[hosts]]\nname = 'Old'\nhostname = '10.0.0.5'\nssh_port = 22\nusername = 'kid'\n";
+    HostRegistry legacy(path);
+    ASSERT_EQ(legacy.hosts().size(), 1u);
+    EXPECT_EQ(legacy.hosts()[0].adminUser, "");
+}
+
+TEST(HostRegistry, RemoveHostDeletesOnlyThatHostAndPersists) {
+    auto path = tempRegistryPath("remove");
+    std::filesystem::remove_all(path.parent_path());
+    {
+        HostRegistry registry(path);
+        registry.addHost(sampleHost("Erstes"));
+        registry.addHost(sampleHost("Zweites"));
+
+        EXPECT_TRUE(registry.removeHost("Erstes"));
+        ASSERT_EQ(registry.hosts().size(), 1u);
+        EXPECT_EQ(registry.hosts()[0].name, "Zweites");
+    }
+
+    HostRegistry reloaded(path);
+    ASSERT_EQ(reloaded.hosts().size(), 1u);
+    EXPECT_EQ(reloaded.hosts()[0].name, "Zweites");
+}
+
+TEST(HostRegistry, RemoveHostReturnsFalseForUnknownNameAndChangesNothing) {
+    auto path = tempRegistryPath("remove-unknown");
+    std::filesystem::remove_all(path.parent_path());
+    HostRegistry registry(path);
+    registry.addHost(sampleHost("Testkind"));
+
+    EXPECT_FALSE(registry.removeHost("Nobody"));
+    EXPECT_EQ(registry.hosts().size(), 1u);
+}
+
 TEST(HostRegistry, TreatsMalformedFileAsEmptyRatherThanCrashing) {
     auto path = tempRegistryPath("malformed");
     std::filesystem::remove_all(path.parent_path());

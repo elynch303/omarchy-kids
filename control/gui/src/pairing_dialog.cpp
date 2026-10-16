@@ -1,4 +1,5 @@
 #include "pairing_dialog.h"
+#include "omarchy-kids-control/agent_client.h"
 #include "omarchy-kids-control/host_registry.h"
 
 #include <QDateTime>
@@ -66,8 +67,12 @@ PairingDialog::PairingDialog(HostRegistry& registry, QWidget* parent)
     setLayout(layout);
 }
 
+QString PairingDialog::keysDirectory() {
+    return QDir::homePath() + "/.local/share/omarchy-kids-control/keys";
+}
+
 QString PairingDialog::computeKeyPath(const QString& childName) const {
-    const QString dir = QDir::homePath() + "/.local/share/omarchy-kids-control/keys";
+    const QString dir = keysDirectory();
     QDir().mkpath(dir);
     return dir + "/" + sanitizeForFilename(childName);
 }
@@ -183,7 +188,10 @@ void PairingDialog::handleStdout() {
 
             HostEntry entry;
             entry.name = nameEdit_->text().trimmed().toStdString();
-            entry.hostname = obj.value("hostname").toString().toStdString();
+            // The host the parent typed (and just reached), not what the child
+            // calls itself: a name like "finn-alienware" often does not
+            // resolve from the parent's computer.
+            entry.hostname = hostEdit_->text().trimmed().toStdString();
             entry.sshPort = obj.value("ssh_port").toInt(22);
             entry.username = obj.value("username").toString().toStdString();
             entry.keyPath = obj.value("key_path").toString().toStdString();
@@ -194,6 +202,25 @@ void PairingDialog::handleStdout() {
             registry_.addHost(entry);
             resultReceived_ = true;
             appendLog(tr("Paired with %1 — saved.").arg(QString::fromStdString(entry.hostname)));
+
+            // `pair` never learns whether the child actually installed the
+            // key (it only sends its confirmation and exits), so prove the
+            // pairing works by asking the agent for its status once. A
+            // failure does not delete the entry — the ✕ in the main window
+            // does that — but the parent should hear about it now, not
+            // later as a mysterious "unreachable".
+            appendLog(tr("Checking the connection ..."));
+            const auto check = omarchy_kids::control::AgentClient::run(entry, {"status", "--json"});
+            if (check.ok) {
+                appendLog(tr("The child answered over SSH — pairing works."));
+            } else {
+                appendLog(tr("Warning: the child did not answer over SSH."));
+                QMessageBox::warning(
+                    this, tr("Pairing may not have completed"),
+                    tr("The pairing was saved, but the child did not answer over SSH. It may not have "
+                       "installed the key (for example if the confirmation took too long), or it is "
+                       "asleep or unreachable. Remove it with the ✕ and pair again if it stays unreachable."));
+            }
         }
     }
 }

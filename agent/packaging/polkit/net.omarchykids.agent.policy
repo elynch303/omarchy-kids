@@ -51,4 +51,27 @@
     </defaults>
     <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/omarchy-kids/omarchy-kids-repair-helper</annotate>
   </action>
+
+  <!--
+    Allow-listed package install (see `agentd/src/handlers.rs`'s
+    `spawn_install_package`, `agentd/src/installable.rs`): unlike the two
+    actions above, this is deliberately `allow_active: yes` — no
+    authentication prompt at all. The parent isn't present at install time;
+    the thing standing in for their say-so is the allow-list file itself
+    (`~/.config/omarchy-kids/installable.toml`, parent-curated, agentd never
+    writes it), which `omarchy-kids-install-helper` re-checks itself, as
+    root, before doing anything — this action only gets that helper invoked
+    with no dialog, it grants no privilege by itself.
+  -->
+  <action id="net.omarchykids.agent.install-package">
+    <description>Install an allow-listed package for the child account</description>
+    <message>Installing an allow-listed package for the child account</message>
+    <icon_name>security-low-symbolic</icon_name>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/omarchy-kids/omarchy-kids-install-helper</annotate>
+  </action>
 </policyconfig>

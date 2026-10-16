@@ -60,6 +60,7 @@ void HostRegistry::load() {
         entry.fingerprint = (*t)["fingerprint"].value_or("");
         entry.pairedAt = (*t)["paired_at"].value_or("");
         entry.sshHostPublicKey = (*t)["ssh_host_public_key"].value_or("");
+        entry.adminUser = (*t)["admin_user"].value_or("");
         hosts_.push_back(std::move(entry));
     }
 }
@@ -78,6 +79,7 @@ void HostRegistry::save() const {
         t.insert("fingerprint", h.fingerprint);
         t.insert("paired_at", h.pairedAt);
         t.insert("ssh_host_public_key", h.sshHostPublicKey);
+        t.insert("admin_user", h.adminUser);
         hostsArray.push_back(std::move(t));
     }
 
@@ -98,6 +100,18 @@ void HostRegistry::addHost(const HostEntry& entry) {
         hosts_.push_back(entry);
     }
     save();
+}
+
+bool HostRegistry::removeHost(const std::string& name) {
+    const auto it = std::remove_if(hosts_.begin(), hosts_.end(), [&](const HostEntry& h) {
+        return h.name == name;
+    });
+    if (it == hosts_.end()) {
+        return false;
+    }
+    hosts_.erase(it, hosts_.end());
+    save();
+    return true;
 }
 
 } // namespace omarchy_kids::control

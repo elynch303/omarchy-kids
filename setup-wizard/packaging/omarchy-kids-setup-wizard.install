@@ -1,0 +1,11 @@
+post_install() {
+  systemctl enable omarchy-kids-setup-wizard.service || true
+}
+
+post_upgrade() {
+  post_install
+}
+
+post_remove() {
+  systemctl disable omarchy-kids-setup-wizard.service || true
+}
