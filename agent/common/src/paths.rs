@@ -43,6 +43,15 @@ pub fn unlockable_apps_path() -> PathBuf {
     config_dir().join("unlockable-apps.toml")
 }
 
+/// Parent-curated allow-list of packages/themes/plugins an `InstallRequest`
+/// may install immediately, with no pending/approve step — same convention
+/// as `unlockable_apps_path()` (meant to be authored by the parent, only
+/// ever read by agentd, never written by it in response to any `Request`).
+/// See `agent/agentd/src/installable.rs`.
+pub fn installable_path() -> PathBuf {
+    config_dir().join("installable.toml")
+}
+
 pub fn data_dir() -> PathBuf {
     home().join(".local/share/omarchy-kids")
 }

@@ -43,13 +43,15 @@ pub fn open(path: &Path) -> Result<Connection> {
 
         CREATE TABLE IF NOT EXISTS install_requests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            package TEXT NOT NULL,
+            kind TEXT NOT NULL DEFAULT 'package',
+            name TEXT NOT NULL,
             repo TEXT NOT NULL,
             version TEXT NOT NULL,
             description TEXT NOT NULL,
             download_size TEXT NOT NULL,
             note TEXT,
             status TEXT NOT NULL,
+            auto_approved INTEGER NOT NULL DEFAULT 0,
             requested_at TEXT NOT NULL,
             decided_at TEXT
         );
@@ -57,7 +59,43 @@ pub fn open(path: &Path) -> Result<Connection> {
         ",
     )
     .context("creating schema")?;
+    migrate_install_requests(&conn).context("migrating install_requests")?;
     Ok(conn)
+}
+
+/// `install_requests` predates `kind`/`auto_approved` and used `package`
+/// where every row is now generically `name` (issue: allow-list installs for
+/// themes/plugins, not just packages). `CREATE TABLE IF NOT EXISTS` above
+/// only helps a brand-new database; an existing one (already deployed for
+/// pairing tests) needs these added by hand. Checked via `PRAGMA table_info`
+/// rather than just trying the `ALTER TABLE`s unconditionally, since SQLite
+/// has no `ADD COLUMN IF NOT EXISTS`/`RENAME COLUMN IF EXISTS` and running
+/// this on every startup must be a no-op once already migrated.
+fn migrate_install_requests(conn: &Connection) -> Result<()> {
+    let mut columns = std::collections::HashSet::new();
+    {
+        let mut stmt = conn.prepare("PRAGMA table_info(install_requests)")?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            columns.insert(row.get::<_, String>(1)?);
+        }
+    }
+    if columns.contains("package") && !columns.contains("name") {
+        conn.execute("ALTER TABLE install_requests RENAME COLUMN package TO name", [])?;
+    }
+    if !columns.contains("kind") {
+        conn.execute(
+            "ALTER TABLE install_requests ADD COLUMN kind TEXT NOT NULL DEFAULT 'package'",
+            [],
+        )?;
+    }
+    if !columns.contains("auto_approved") {
+        conn.execute(
+            "ALTER TABLE install_requests ADD COLUMN auto_approved INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 pub fn start_session(conn: &Connection, app: &str, pid: u32, started_at: DateTime<Utc>) -> Result<()> {
@@ -218,63 +256,81 @@ pub fn recent_override_failure_count(conn: &Connection, app: &str, since: DateTi
 pub const INSTALL_STATUSES: &[&str] = &["pending", "approved", "denied", "installed"];
 
 pub struct NewInstallRequest<'a> {
-    pub package: &'a str,
+    pub kind: &'a str,
+    pub name: &'a str,
     pub repo: &'a str,
     pub version: &'a str,
     pub description: &'a str,
     pub download_size: &'a str,
     pub note: Option<&'a str>,
+    /// Whether `name` matched the parent's allow-list at request time —
+    /// when true, the row is inserted already `approved` (see
+    /// `insert_install_request`) instead of `pending`.
+    pub auto_approved: bool,
 }
 
 pub struct InstallRequestRow {
     pub id: i64,
-    pub package: String,
+    pub kind: String,
+    pub name: String,
     pub repo: String,
     pub version: String,
     pub description: String,
     pub download_size: String,
     pub note: Option<String>,
     pub status: String,
+    pub auto_approved: bool,
     pub requested_at: String,
     pub decided_at: Option<String>,
 }
 
 const INSTALL_REQUEST_COLUMNS: &str =
-    "id, package, repo, version, description, download_size, note, status, requested_at, decided_at";
+    "id, kind, name, repo, version, description, download_size, note, status, auto_approved, requested_at, decided_at";
 
 fn install_request_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<InstallRequestRow> {
     Ok(InstallRequestRow {
         id: row.get(0)?,
-        package: row.get(1)?,
-        repo: row.get(2)?,
-        version: row.get(3)?,
-        description: row.get(4)?,
-        download_size: row.get(5)?,
-        note: row.get(6)?,
-        status: row.get(7)?,
-        requested_at: row.get(8)?,
-        decided_at: row.get(9)?,
+        kind: row.get(1)?,
+        name: row.get(2)?,
+        repo: row.get(3)?,
+        version: row.get(4)?,
+        description: row.get(5)?,
+        download_size: row.get(6)?,
+        note: row.get(7)?,
+        status: row.get(8)?,
+        auto_approved: row.get::<_, i64>(9)? != 0,
+        requested_at: row.get(10)?,
+        decided_at: row.get(11)?,
     })
 }
 
-/// Records a new request as `pending` and returns its id.
+/// Records a new request and returns its id. `new.auto_approved` decides the
+/// initial status: `approved` (skips the pending queue — the allow-list
+/// already matched, see `InstallRequest`'s doc comment) or `pending` as
+/// before.
 pub fn insert_install_request(
     conn: &Connection,
     new: &NewInstallRequest<'_>,
     requested_at: DateTime<Utc>,
 ) -> Result<i64> {
+    let status = if new.auto_approved { "approved" } else { "pending" };
+    let decided_at = new.auto_approved.then(|| requested_at.to_rfc3339());
     conn.execute(
         "INSERT INTO install_requests
-            (package, repo, version, description, download_size, note, status, requested_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'pending', ?7)",
+            (kind, name, repo, version, description, download_size, note, status, auto_approved, requested_at, decided_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
-            new.package,
+            new.kind,
+            new.name,
             new.repo,
             new.version,
             new.description,
             new.download_size,
             new.note,
-            requested_at.to_rfc3339()
+            status,
+            new.auto_approved as i64,
+            requested_at.to_rfc3339(),
+            decided_at,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -290,11 +346,11 @@ pub fn install_request_by_id(conn: &Connection, id: i64) -> Result<Option<Instal
     .context("reading an install request")
 }
 
-/// The id of a still-pending request for this exact package, if any.
-pub fn pending_install_request_id(conn: &Connection, package: &str) -> Result<Option<i64>> {
+/// The id of a still-pending request for this exact (kind, name), if any.
+pub fn pending_install_request_id(conn: &Connection, kind: &str, name: &str) -> Result<Option<i64>> {
     conn.query_row(
-        "SELECT id FROM install_requests WHERE package = ?1 AND status = 'pending' LIMIT 1",
-        params![package],
+        "SELECT id FROM install_requests WHERE kind = ?1 AND name = ?2 AND status = 'pending' LIMIT 1",
+        params![kind, name],
         |row| row.get(0),
     )
     .optional()
@@ -363,14 +419,16 @@ mod tests {
         (dir, conn)
     }
 
-    fn sample<'a>(package: &'a str, note: Option<&'a str>) -> NewInstallRequest<'a> {
+    fn sample<'a>(name: &'a str, note: Option<&'a str>) -> NewInstallRequest<'a> {
         NewInstallRequest {
-            package,
+            kind: "package",
+            name,
             repo: "extra",
             version: "1.0-1",
             description: "A test package",
             download_size: "1.00 MiB",
             note,
+            auto_approved: false,
         }
     }
 
@@ -380,12 +438,30 @@ mod tests {
         let id = insert_install_request(&conn, &sample("gimp", Some("for art class")), Utc::now()).unwrap();
 
         let row = install_request_by_id(&conn, id).unwrap().unwrap();
-        assert_eq!(row.package, "gimp");
+        assert_eq!(row.name, "gimp");
         assert_eq!(row.status, "pending");
+        assert!(!row.auto_approved);
         assert_eq!(row.note.as_deref(), Some("for art class"));
         assert!(row.decided_at.is_none());
-        assert_eq!(pending_install_request_id(&conn, "gimp").unwrap(), Some(id));
+        assert_eq!(pending_install_request_id(&conn, "package", "gimp").unwrap(), Some(id));
         assert_eq!(pending_install_request_count(&conn).unwrap(), 1);
+    }
+
+    #[test]
+    fn an_auto_approved_request_starts_approved_with_decided_at_set() {
+        let (_dir, conn) = temp_db();
+        let new = NewInstallRequest {
+            auto_approved: true,
+            ..sample("gimp", None)
+        };
+        let id = insert_install_request(&conn, &new, Utc::now()).unwrap();
+
+        let row = install_request_by_id(&conn, id).unwrap().unwrap();
+        assert_eq!(row.status, "approved");
+        assert!(row.auto_approved);
+        assert!(row.decided_at.is_some());
+        // Never entered the pending queue.
+        assert_eq!(pending_install_request_id(&conn, "package", "gimp").unwrap(), None);
     }
 
     #[test]
@@ -400,7 +476,7 @@ mod tests {
         assert!(!decide_pending_install_request(&conn, 9999, "denied", Utc::now()).unwrap());
         // No longer pending, so no longer counted or matched as pending.
         assert_eq!(pending_install_request_count(&conn).unwrap(), 0);
-        assert_eq!(pending_install_request_id(&conn, "gimp").unwrap(), None);
+        assert_eq!(pending_install_request_id(&conn, "package", "gimp").unwrap(), None);
     }
 
     #[test]
@@ -429,7 +505,7 @@ mod tests {
 
         let pending = list_install_requests(&conn, Some("pending"), 50).unwrap();
         assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].package, "second");
+        assert_eq!(pending[0].name, "second");
         assert_eq!(list_install_requests(&conn, Some("denied"), 50).unwrap().len(), 1);
     }
 }

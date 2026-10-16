@@ -1,0 +1,10 @@
+#!/bin/bash
+# Omarchy Kids: shadows the real /usr/bin/omarchy-pkg-aur-install (Install >
+# AUR in the native Omarchy menu). Unlike the other wrappers in this
+# directory, this one never offers a request flow — AUR packages run an
+# unreviewed build script, so there is no way for a parent to safely
+# pre-approve one ahead of time (see agentd/src/installs.rs's lookup, which
+# only ever resolves official/Omarchy repositories, never the AUR).
+echo "Programs from the AUR can't be requested here — they run an unreviewed build script, so a parent can't safely approve one ahead of time."
+echo "If the same program is also a regular package, try Install > Package instead."
+read -rp "Press Enter to close..." _

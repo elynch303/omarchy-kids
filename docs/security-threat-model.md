@@ -150,7 +150,79 @@ audit for the `spake2` crate). Two gaps closed by this audit:
   transport::read_line_bounded`, 64 KiB cap) instead of an unbounded
   `read_line()`.
 
-### 5. Other accepted residual risks (recorded elsewhere, cross-referenced here)
+### 5. Allow-listed install (`pkexec`, zero-prompt)
+
+Added alongside the generalized `InstallRequest` (package/theme/plugin —
+see `agent/common/src/protocol.rs`'s doc comment). Unlike boundary 3's
+`auth_admin` action, `net.omarchykids.agent.install-package`
+(`agent/packaging/polkit/`) is `allow_active: yes`: no authentication
+prompt, by design — the parent isn't present at install time, and the whole
+point of an allow-list is that they don't need to be, for something they've
+already said yes to in general.
+
+The boundary this leans on instead is content, same as boundary 1's
+`Unlock`/`SetTier` mitigation, but one link further: `agentd` (running as
+the child, same untrusted position as everything else in boundary 1)
+decides whether a fresh `InstallRequest` is auto-approved by checking
+`~/.config/omarchy-kids/installable.toml` — a parent-curated file agentd
+only ever reads, never writes (same convention as boundary 1's
+`unlockable-apps.toml`, and it inherits that same accepted residual risk: a
+malicious local child-uid process could edit it directly, since nothing
+hardens that directory's permissions beyond normal `$HOME` ownership).
+
+Because that file *is* in principle child-writable, the privileged half
+(`omarchy-kids-install-helper`, the actual `pkexec` target, running as
+root) does not trust agentd's decision — it re-reads the allow-list itself,
+re-validates the name, and re-confirms the package is real, synced, and
+non-AUR via a fresh `pacman -Si` before ever calling `pacman -S`. If the
+allow-list file could be forged, the helper's own re-check bounds the
+damage to "install one more package from the official/Omarchy repos" —
+the same ceiling a malicious child already has via boundary 1's residual
+risk elsewhere (e.g. inflating their own time budget via `config.toml`),
+not a new escalation.
+
+Themes and plugins are deliberately **not** given the zero-prompt `pkexec`
+path at all — they need no root (both live under the child's own
+`~/.config/omarchy/`), so `agentd` performs the `git clone` itself, no
+helper involved. The allow-list entry for a theme/plugin maps a name to one
+specific, parent-pinned URL rather than a bare name: Omarchy's own
+`omarchy-theme-install` clones an arbitrary caller-supplied URL with no
+catalog or signing (confirmed by reading the installed script on
+2026-09-23), the same "runs whatever's in the repo" risk class as the AUR —
+so the *child* can only ever ask by name, and only the URL a parent already
+vetted is ever passed to `git clone`, never anything the child typed. A
+cloned plugin is also refused (directory deleted) unless it has a
+`manifest.json` — Omarchy plugins are opt-in, and a directory without one
+isn't a real one regardless of what else the repo contains — and only then
+registered into `shell.json`'s `plugins[]`, the same mechanism
+`omarchy-kids-set-tier` already uses for its own launcher plugin.
+
+**Explicitly not built here:** approving a *pending* (non-allow-listed)
+install request from the Control Center still does not itself install
+anything — see boundary 1/2's reasoning for why `DecideInstallRequest`
+being reachable from the same untrusted position as everything else means
+a `status` flag alone must stay inert. Auto-install is wired to the
+allow-list match at request time specifically *because* that check runs
+inside `agentd`'s own trusted code path before any client-supplied `status`
+is involved, not because approval was hardened.
+
+**Reaching this from the native Omarchy menu.** `tiers/maxi/hypr/autostart.lua`
+prepends `/usr/lib/omarchy-kids/menu-wrappers` onto `PATH` via Hyprland's own
+`hl.env` — the same mechanism Omarchy's own `default/hypr/envs.lua` uses to
+set `PATH` for the whole session in the first place (confirmed empirically on
+a real device, 2026-09-23: neither `~/.bashrc` nor
+`~/.config/environment.d` reaches the process tree Quickshell spawns a menu
+action in — only extending `PATH` the same way Omarchy itself does works).
+This changes *which command a name resolves to*, not any privilege: the
+account's `PATH` just finds `menu-wrappers/omarchy-pkg-install` before the
+real `/usr/bin/omarchy-pkg-install`, and that wrapper does nothing but exec
+`omarchy-kids-request-install package` — the exact same request path
+described above, reached from a terminal or the menu alike. Omarchy's own
+`omarchy-menu.jsonc` is never modified, so this survives Omarchy updates the
+earlier `menu.sh`-override attempt didn't. `omarchy-pkg-aur-install`'s
+wrapper never offers a request at all, matching the AUR refusal above.
+
+### 6. Other accepted residual risks (recorded elsewhere, cross-referenced here)
 
 - **`librespot`'s `persist_credentials: true`** (not part of this audit;
   documented 2026-08-27 in the private vault note "Omarchy Kids -

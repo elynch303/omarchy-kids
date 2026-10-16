@@ -1,60 +1,17 @@
-//! Install requests (see `Request::InstallRequest`): package-name validation,
-//! cleaning the child's free-text note, and the two pacman lookups.
+//! Install requests (see `Request::InstallRequest`): the two pacman lookups
+//! for the `Package` kind. Name/note validation lives in
+//! `omarchy_kids_common::install_validate`, shared with the root-run
+//! `install-helper` (see `handlers::handle_install_request`).
 //!
-//! Nothing here installs anything. agentd runs as the child, which has no
-//! admin rights; a request is only a record for a parent to act on.
+//! Nothing here installs anything by itself for a *pending* request — that
+//! still waits on a parent. An allow-listed request is different: see
+//! `handlers::handle_install_request` and `installable.rs`.
 
 use std::process::Command;
 
 /// Requests waiting for a decision at once — enough for a child to ask for a
 /// few things, low enough that they can't bury a parent in requests.
 pub const MAX_PENDING_REQUESTS: u32 = 10;
-
-const MAX_PACKAGE_NAME_LEN: usize = 100;
-const MAX_NOTE_CHARS: usize = 200;
-
-/// Arch package names use lowercase letters, digits and `@ . _ + -`, and
-/// don't start with `-` or `.`. Enforced strictly because the name is handed
-/// to pacman (as a plain argument, never through a shell) and displayed to a
-/// parent; anything else is refused up front.
-pub fn validate_package_name(name: &str) -> Result<(), String> {
-    if name.is_empty() {
-        return Err("no package name given".into());
-    }
-    if name.len() > MAX_PACKAGE_NAME_LEN {
-        return Err("that package name is too long".into());
-    }
-    let first = name.chars().next().unwrap_or(' ');
-    if first == '-' || first == '.' {
-        return Err(format!("'{name}' is not a valid package name"));
-    }
-    let ok = name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || "@._+-".contains(c));
-    if !ok {
-        return Err(format!(
-            "'{name}' is not a valid package name (use lowercase letters, digits and @ . _ + - only)"
-        ));
-    }
-    Ok(())
-}
-
-/// The child's free-text note: control characters dropped (a terminal or
-/// notification must not be able to interpret them), length capped, and
-/// `None` if nothing is left.
-pub fn sanitize_note(note: &str) -> Option<String> {
-    let cleaned: String = note
-        .chars()
-        .filter(|c| !c.is_control())
-        .take(MAX_NOTE_CHARS)
-        .collect();
-    let trimmed = cleaned.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
 
 /// What `pacman -Si` says about one package.
 #[derive(Debug, PartialEq, Eq)]
@@ -141,33 +98,6 @@ pub fn is_installed(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn ordinary_arch_package_names_are_accepted() {
-        for name in ["gimp", "minecraft-launcher", "lib32-glibc", "python-numpy", "g++", "gtk4", "a"] {
-            assert!(validate_package_name(name).is_ok(), "{name} should be valid");
-        }
-    }
-
-    #[test]
-    fn names_that_could_be_options_or_shell_tricks_are_refused() {
-        for name in [
-            "", "-S", "--sysupgrade", ".hidden", "UPPER", "with space", "a;b", "a&&b", "$(id)", "a`b`",
-            "a/b", "../x", "naïve", "tab\there", "new\nline",
-        ] {
-            assert!(validate_package_name(name).is_err(), "{name:?} should be refused");
-        }
-        assert!(validate_package_name(&"a".repeat(101)).is_err());
-    }
-
-    #[test]
-    fn notes_lose_control_characters_and_are_capped() {
-        assert_eq!(sanitize_note("  for art class  ").as_deref(), Some("for art class"));
-        assert_eq!(sanitize_note("a\u{1b}[31mred\u{7}\nb").as_deref(), Some("a[31mredb"));
-        assert_eq!(sanitize_note("   \n\t ").as_deref(), None);
-        assert_eq!(sanitize_note("x").as_deref(), Some("x"));
-        assert_eq!(sanitize_note(&"y".repeat(500)).unwrap().chars().count(), 200);
-    }
 
     const SI_SAMPLE: &str = "\
 Repository      : extra

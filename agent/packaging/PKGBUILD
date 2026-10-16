@@ -10,7 +10,7 @@ license=('MIT')
 # this separate file: functions defined in the PKGBUILD itself are not
 # packaged, so they silently never ran.
 install=omarchy-kids-agent.install
-depends=('polkit' 'sqlite' 'ufw' 'libnotify' 'openssh' 'sudo')
+depends=('polkit' 'sqlite' 'ufw' 'libnotify' 'openssh' 'sudo' 'git')
 makedepends=('cargo' 'pkgconf')
 optdepends=('gcompris-qt: mini tier default app'
             'blinken: mini tier default app'
@@ -54,6 +54,8 @@ package() {
     "$pkgdir/usr/lib/omarchy-kids/omarchy-kids-override-helper"
   install -Dm755 target/release/omarchy-kids-repair-helper \
     "$pkgdir/usr/lib/omarchy-kids/omarchy-kids-repair-helper"
+  install -Dm755 target/release/omarchy-kids-install-helper \
+    "$pkgdir/usr/lib/omarchy-kids/omarchy-kids-install-helper"
 
   install -Dm644 packaging/systemd/omarchy-kids-agentd.service \
     "$pkgdir/usr/lib/systemd/user/omarchy-kids-agentd.service"

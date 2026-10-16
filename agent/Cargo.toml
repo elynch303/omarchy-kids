@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["common", "agent", "agentd", "wrapper", "override-helper", "pairing", "repair-helper"]
+members = ["common", "agent", "agentd", "wrapper", "override-helper", "pairing", "repair-helper", "install-helper"]
 
 [workspace.package]
 version = "0.1.0"

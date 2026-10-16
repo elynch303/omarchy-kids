@@ -7,8 +7,8 @@
 use clap::{Parser, Subcommand};
 use omarchy_kids_common::paths;
 use omarchy_kids_common::protocol::{
-    AppUsage, InstallRequestInfo, InstallRequestsPayload, Request, Response, ReportPayload,
-    StatusPayload,
+    AppUsage, InstallKind, InstallRequestInfo, InstallRequestsPayload, Request, Response,
+    ReportPayload, StatusPayload,
 };
 use omarchy_kids_common::transport;
 use std::path::{Path, PathBuf};
@@ -72,12 +72,18 @@ enum Command {
         #[arg(long)]
         apps_file: Option<PathBuf>,
     },
-    /// Ask a parent to approve installing a package. Only packages from the
-    /// official or Omarchy repositories can be requested (not the AUR), and
-    /// nothing is installed until a parent approves it and installs it with
-    /// their admin account.
+    /// Ask a parent to approve installing a package, theme, or plugin. If
+    /// `name` is already on the parent's allow-list it installs right away;
+    /// otherwise it's recorded for a parent to decide on later (packages
+    /// only — a theme/plugin not already allow-listed is refused, since
+    /// there's no safe way to look up an arbitrary one; see
+    /// `omarchy_kids_common::protocol::InstallRequest`'s doc comment). Only
+    /// packages from the official or Omarchy repositories can ever be
+    /// requested (not the AUR).
     RequestInstall {
-        package: String,
+        name: String,
+        #[arg(long, default_value = "package")]
+        kind: InstallKind,
         /// Optional short note for the parent ("for art class").
         #[arg(long)]
         note: Option<String>,
@@ -173,8 +179,9 @@ fn to_request(cmd: &Command) -> Request {
             minutes: *minutes,
         },
         Command::Report { week } => Request::Report { week: *week },
-        Command::RequestInstall { package, note } => Request::InstallRequest {
-            package: package.clone(),
+        Command::RequestInstall { name, kind, note } => Request::InstallRequest {
+            kind: *kind,
+            name: name.clone(),
             note: note.clone(),
         },
         Command::Requests { status } => Request::ListInstallRequests {
@@ -219,11 +226,18 @@ fn send_and_print(socket: &Path, req: Request, json_out: bool) -> Result<(), Str
             let info: InstallRequestInfo =
                 serde_json::from_value(resp.data.clone().unwrap_or_default())
                     .map_err(|e| format!("malformed install request payload: {e}"))?;
-            println!(
-                "Request #{} sent: {} {} ({}, {}).",
-                info.id, info.package, info.version, info.repo, info.download_size
-            );
-            println!("A parent has to approve it, and then install it for you.");
+            if info.auto_approved {
+                println!(
+                    "Request #{} sent: {} '{}' — already on your parent's allow-list, installing now.",
+                    info.id, info.kind, info.name
+                );
+            } else {
+                println!(
+                    "Request #{} sent: {} {} ({}, {}).",
+                    info.id, info.name, info.version, info.repo, info.download_size
+                );
+                println!("A parent has to approve it, and then install it for you.");
+            }
         }
         Request::ListInstallRequests { .. } => print_install_requests(&resp)?,
         Request::DecideInstallRequest { id, decision } => println!(
@@ -243,13 +257,17 @@ fn print_install_requests(resp: &Response) -> Result<(), String> {
         println!("No install requests.");
         return Ok(());
     }
-    println!("{:<5} {:<10} {:<28} {:<10} note", "id", "status", "package", "size");
+    println!(
+        "{:<5} {:<8} {:<10} {:<28} {:<10} note",
+        "id", "kind", "status", "name", "size"
+    );
     for r in &payload.requests {
         println!(
-            "{:<5} {:<10} {:<28} {:<10} {}",
+            "{:<5} {:<8} {:<10} {:<28} {:<10} {}",
             r.id,
+            r.kind.to_string(),
             r.status,
-            format!("{} {}", r.package, r.version),
+            format!("{} {}", r.name, r.version).trim(),
             r.download_size,
             r.note.as_deref().unwrap_or("")
         );

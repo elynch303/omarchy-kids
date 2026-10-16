@@ -22,6 +22,15 @@ package() {
   install -Dm755 omarchy-kids-set-tier \
     "$pkgdir/usr/lib/omarchy-kids/tiers/omarchy-kids-set-tier"
   cp -a mini maxi "$pkgdir/usr/lib/omarchy-kids/tiers/"
+  # menu-wrappers/ ships inside the maxi/ tree (it's maxi-only) but installs
+  # to its own top-level path, not under tiers/ — that's what
+  # tiers/maxi/hypr/autostart.lua prepends onto PATH, and what each wrapper
+  # script's own header assumes.
+  rm -rf "$pkgdir/usr/lib/omarchy-kids/tiers/maxi/menu-wrappers"
+  install -d "$pkgdir/usr/lib/omarchy-kids/menu-wrappers"
+  for wrapper in maxi/menu-wrappers/*; do
+    install -Dm755 "$wrapper" "$pkgdir/usr/lib/omarchy-kids/menu-wrappers/$(basename "$wrapper")"
+  done
   # The child-facing "ask a parent to install something" screen (tier maxi).
   install -Dm755 omarchy-kids-request-install \
     "$pkgdir/usr/lib/omarchy-kids/tiers/omarchy-kids-request-install"
